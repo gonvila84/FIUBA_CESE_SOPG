@@ -1,12 +1,11 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <string.h>
 #include <fcntl.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include <string.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
 
 #define FIFO_NAME "writer_fifo"
 #define BUFFER_SIZE 300
@@ -19,7 +18,7 @@ enum operationState {
 typedef enum operationState operationState_t;
 typedef int fileDescriptor_t;
 operationState_t createNamedFifo (const char * name);
-fileDescriptor_t openNamedFifo (const char * name);
+operationState_t openNamedFifo (const char * name, fileDescriptor_t * fileDescriptor);
 operationState_t readMessage (char * message, int fileDescriptor, int * bytesRead);
 fileDescriptor_t fileDescriptor;
 
@@ -28,13 +27,25 @@ int main(void)
 {
 	uint8_t inputBuffer[BUFFER_SIZE];
 	int32_t bytesRead, returnCode, fd;
-    
-    createNamedFifo (FIFO_NAME);
-    fileDescriptor=openNamedFifo(FIFO_NAME);
 
-    
+    FILE *signFile;
+    FILE *dataFile;
+    signFile = fopen("./Sign.txt", "w");
+    dataFile = fopen("./Log.txt", "w");
+
+     //Creo el named fifo
+    if (failed == createNamedFifo (FIFO_NAME))
+    {
+		exit(1);
+    }
+    //Abrir un named fifo
+    if (failed == openNamedFifo(FIFO_NAME,&fileDescriptor))
+    {
+		exit(1);
+    }
     printf("A writer was detected and ready to send messages.\n");    
 
+    const char dataPattern[5] = "DATA:";
 	do
 	{
         printf("Output> ");
@@ -42,6 +53,16 @@ int main(void)
         {
 			inputBuffer[bytesRead] = '\0';
 			printf("%s\n", inputBuffer);
+            if (0 == strncmp(inputBuffer,dataPattern,5))
+            {
+                fprintf(dataFile, "%s\n", inputBuffer);
+                fflush(dataFile);
+            }
+            else
+            {
+                fprintf(signFile, "%s\n", inputBuffer);
+                fflush(signFile);
+            }
         }
         else
         {
@@ -49,7 +70,7 @@ int main(void)
         }
 	}
 	while (bytesRead > 0);
-
+    fclose(dataFile);
 	return 0;
 }
 
@@ -61,34 +82,33 @@ operationState_t createNamedFifo (const char * name)
     switch (returnCode)
     {
         case 0:
-            printf("Information: The named fifo was created. (return code: %d).\n", returnCode);
+            printf("Information: The named fifo was created.\n");
             operationState = success;
         break;
 
         case -1:
-            printf("Information: The named fifo was found. No need to recreate. (return code: %d).\n", returnCode);
-            operationState = failed;
+            printf("Information: The named fifo was found. No need to recreate.\n");
+            operationState = success;
         break;
 
         default:
-            printf("Error: The named fifo creation failed. (return code: %d).\n", returnCode);
+            perror("Error: The named fifo creation failed.\n");
             operationState = failed;
         break;
     }
     return operationState;
 }
 
-fileDescriptor_t openNamedFifo (const char * name)
+operationState_t openNamedFifo (const char * name, fileDescriptor_t * fileDescriptor)
 {
-    int fd;
-    if ( (fd = open(name, O_RDONLY) ) < 0 )
+    *fileDescriptor = open(name, O_RDONLY);
+    if ( *fileDescriptor < 0 )
     {
-        printf("Error: There was a failure when opening the FIFO.\n");
+        perror("Error: There was a failure when opening the FIFO.\n");
         return failed;
     }
     printf("Information: The named fifo was opened correctly.\n");
-    
-    return fd;
+    return success;
 }
 
 operationState_t readMessage (char * message, int fileDescriptor, int * bytesRead)
